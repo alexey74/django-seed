@@ -1,6 +1,7 @@
 import random, logging
 
 from django.db.models import ForeignKey, ManyToManyField, OneToOneField
+from django.utils.crypto import get_random_string
 
 from django_seed.exceptions import SeederException
 from django_seed.guessers import NameGuesser, FieldTypeGuesser
@@ -47,25 +48,23 @@ class ModelSeeder(object):
     def build_many_relation(field, related_model):
         def func(inserted):
             if related_model in inserted and inserted[related_model]:
-                max_relations = min(
-                    10, round(len(inserted[related_model]) / 5) + 1)
+                max_relations = min(10, round(len(inserted[related_model]) / 5) + 1)
 
                 return_list = []
                 for _ in range(random.randint(1, max_relations)):
                     choice = random.choice(inserted[related_model])
-                    return_list.append(related_model.objects.get(
-                        pk=choice
-                    ))
+                    return_list.append(related_model.objects.get(pk=choice))
 
                 return return_list
             elif not field.blank:
                 message = 'Field {} cannot be null'.format(field)
                 raise SeederException(message)
             else:
-                logging.warn("Could not build many-to-many relationship for between {} and {}".format(
-                    field,
-                    related_model,
-                ))
+                logging.warn(
+                    "Could not build many-to-many relationship for between {} and {}".format(
+                        field, related_model,
+                    )
+                )
                 return []
 
         return func
@@ -98,19 +97,19 @@ class ModelSeeder(object):
             if field_name in formatters:
                 continue
 
-            if field.get_default():
+            if field.get_default() and not field.unique:
                 formatters[field_name] = field.get_default()
                 continue
 
             if isinstance(field, OneToOneField):
                 existing = set()
                 formatters[field_name] = self.build_one_relation(
-                    field, field.related_model, existing)
+                    field, field.related_model, existing
+                )
                 continue
 
             if isinstance(field, ForeignKey):
-                formatters[field_name] = self.build_relation(
-                    field, field.related_model)
+                formatters[field_name] = self.build_relation(field, field.related_model)
                 continue
 
             if not field.choices:
@@ -125,8 +124,7 @@ class ModelSeeder(object):
                 continue
 
         for field in self.model._meta.many_to_many:
-            self.many_relations[field.name] = self.build_many_relation(
-                field, field.related_model)
+            self.many_relations[field.name] = self.build_many_relation(field, field.related_model)
 
         return formatters
 
@@ -162,7 +160,10 @@ class ModelSeeder(object):
             field = self.model._meta.get_field(data_field)
 
             if field.max_length and isinstance(faker_data[data_field], str):
-                faker_data[data_field] = faker_data[data_field][:field.max_length]
+                faker_data[data_field] = faker_data[data_field][: field.max_length]
+
+            if field.unique and isinstance(faker_data[data_field], str):
+                faker_data[data_field] = get_random_string(field.max_length)
 
         obj = manager.create(**faker_data)
 
@@ -200,7 +201,9 @@ class Seeder(object):
         # orders for a specific model are created before a single execute
         model = ModelSeeder(model)
 
-        model.field_formatters = model.guess_field_formatters(self.faker, formatters=customFieldFormatters)
+        model.field_formatters = model.guess_field_formatters(
+            self.faker, formatters=customFieldFormatters
+        )
 
         order = {
             "klass": model.model,
